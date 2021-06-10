@@ -1,16 +1,39 @@
 import os
 from app import app
+from werkzeug.datastructures import Authorization
 from pymongo import MongoClient
 from flask import Flask, jsonify, request, Response, json
-import pprint
+import requests
 from bson.objectid import ObjectId
 from bson.json_util import dumps
 from passlib.hash import pbkdf2_sha256
 import jwt
+from functools import wraps
 
 client = MongoClient("mongodb+srv://dbUser:user000@cluster0.1t5ad.mongodb.net/ourDb?retryWrites=true&w=majority")
 db = client.ourDb
 users = db["users"]
+
+#login user
+def create_token(user_id):
+    encoded_jwt = jwt.encode({"user_id": user_id}, "secret", algorithm="HS256")
+    return encoded_jwt
+
+def check_for_token(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        token = request.headers.get("Authorization")
+        if not token: 
+            return jsonify({'msg': 'missing token'})
+        try: 
+            without_bearer = str.split(token)[1]
+            data = jwt.decode(without_bearer, "secret", algorithms="HS256")
+            print(data)
+        except Exception as ex:
+            print(ex)
+            return jsonify({"msg": "invalid token"})
+        return func(*args, **kwargs)
+    return wrapper
 
 @app.route("/users", methods=['GET', 'POST'])
 def get_users():
@@ -56,6 +79,7 @@ def get_users():
 
 #get user by id
 @app.route("/users/<string:userid>", methods=['GET'])
+@check_for_token
 def get_user_by_id(userid):
     objInstance = ObjectId(userid)
     this_user = users.find_one({"_id": objInstance})
@@ -65,17 +89,12 @@ def get_user_by_id(userid):
         status=200,
         mimetype='application/json')
 
-#login user
-def create_token(user_id):
-    encoded_jwt = jwt.encode({"user_id": user_id}, "secret", algorithm="HS256")
-    return encoded_jwt
 
 @app.route("/users/login", methods=['POST'])
 def login():
     request_data = request.get_json()
     email = request_data['email']
     password = request_data['password']
-    
     user = users.find_one({'email': email})
     if user == None:
         return Response(response='User not found with this email', status=404)
@@ -85,7 +104,7 @@ def login():
             encoded_jwt = create_token(user_id)
             return Response(response=encoded_jwt, status=200)
         else: 
-            return Response(response='Inserted password does not match this E-mail account', status=404)
+            return Response(response='User not found with this email', status=404)
  
 
     
